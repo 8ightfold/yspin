@@ -9,9 +9,9 @@ To download a list of videos, you must create a text file with all the links you
 
 Here is an example of a list of videos:
 ```
-https://www.youtube.com/watch?v=kJQP7kiw5Fk
-https://www.youtube.com/watch?v=LECSVlc6O1g
-https://www.youtube.com/watch?v=JGwWNGJdvx8
+https://www.youtube.com/watch?v=IJ4kPmiUP_Y
+https://www.youtube.com/watch?v=-Vvex2oThtA
+https://www.youtube.com/watch?v=yVHPL80z59w
 ```
 
 You will now have a bunch of subfolders with the following format:
