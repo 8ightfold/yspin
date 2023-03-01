@@ -43,5 +43,8 @@ You should now see your videos being reuploaded. Unlike with the downloader, the
 
 You also need to verify your Youtube account to upload thumbnails. If you do not, the reuploader will time out. You may also have issues with upload limits if you are reuploading a lot of videos.
 
+## Disclaimer
+DO NOT use this to pass someone else's content as your own. This was only made for saving videos from many sources for easy viewing. I do not condone the use of yspin for malicious purposes. If you modify the program or use it for another purpose, that's on you.
+
 ## Notes
 This program was meant for archival purposes. It is not meant to be extremely portable, nor flexible. If you run into any issues with the intended usage, let me know; otherwise, you're on your own.
