@@ -87,6 +87,11 @@ def upload_from_folder(page, folder):
     description = read_file(folder + '/desc.txt')
     visibility = 'PUBLIC'
 
+    if not os.path.exists(video_file):
+        print(f'ERROR: Could not find required file for {folder}')
+        with open(folder + '/noupload', 'w') as f: f.close()
+        return
+
     print(f'{title}')
     # Open upload menu
     page.wait_for_selector('ytcp-button[id="create-icon"]')
@@ -100,7 +105,9 @@ def upload_from_folder(page, folder):
 
     # Add title and description
     text_inputs = page.locator('#input')
-    text_inputs.first.locator('div[id="textbox"]').fill(title)
+    if text_inputs.first.locator('div[id="textbox"]').count():
+        text_inputs.first.locator('div[id="textbox"]').fill(title)
+    else: text_inputs.all()[1].locator('div[id="textbox"]').fill(title)
     text_inputs.last.locator('div[id="textbox"]').fill(description)
 
     # Add thumbnail
@@ -156,7 +163,7 @@ def upload_to_channel(file='secrets.json'):
                     upload_from_folder(page, folder)
                     page.reload()
                 print('DIALOG: Sleeping...\n')
-                time.sleep(20)
+                time.sleep(10)
 
             page.close(run_before_unload=True)
             browser.close()
