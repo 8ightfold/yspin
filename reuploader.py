@@ -5,19 +5,31 @@ import os.path
 
 from pytube import Channel
 from playwright.sync_api import sync_playwright
-from playwright.sync_api import TimeoutError as TERR
 from downloader import get_output_dir
+
+did_upload = False
+
+
+class FileNotFoundException(Exception):
+    "Raised when a file needed for reuploading is not found."
+    pass
+
+
+def wait_for(seconds):
+    start = time.time()
+    while time.time() - start < seconds:
+        pass
 
 
 def write_file(name, contents):
     insert_contents = str(contents).encode('utf-8', 'ignore')
-    file = open(name, 'w')
+    file = open(name, 'w', encoding='utf-8')
     file.write(str(insert_contents))
     file.close()
 
 
 def read_file(name):
-    file = open(name, 'r')
+    file = open(name, 'r', encoding='utf-8')
     contents = file.read()
     file.close()
     return contents
@@ -31,7 +43,7 @@ def read_alternates(_dict, first, second):
 
 
 def parse_json(file):
-    file = open(file, 'r')
+    file = open(file, 'r', encoding='utf-8')
     contents = file.read()
     file.close()
 
@@ -71,19 +83,53 @@ def file_chooser_fn(page, element, filepath):
     file_chooser.set_files(filepath)
 
 
+def close_secondary_dialog(page):
+    if page.locator('ytcp-button[id="close-button"]').count() == 1:
+        page.click('ytcp-button[id="close-button"]')
+    # Specific options
+    elif page.locator('#close-button.ytcp-uploads-still-processing-dialog').count():
+        page.click('#close-button.ytcp-uploads-still-processing-dialog')
+    elif page.locator('#close-button.ytcp-video-share-dialog').count():
+        page.click('#close-button.ytcp-video-share-dialog')
+    else:
+        print("WARNING: Secondary dialog box could not be closed, last upload may fail")
+        page.reload()
+
+
+def except_upload_limit_reached(page):
+    error_element = page.locator('#error-message.error-details.ytcp-uploads-dialog')
+    if error_element.is_visible() or error_element.is_enabled():
+        raise Exception('Daily upload limit reached.')
+
+
 def add_screenshot(page, name):
     filepath = 'screenshots/' + name + '.png'
     page.screenshot(path=filepath)
 
 
-def upload_from_folder(page, folder):
+def check_filepath(filepath):
+    if not os.path.exists(filepath):
+        folder = os.path.dirname(filepath)
+        filename = os.path.split(filepath)[1]
+        print(f'WARNING: Could not locate "{filename}" in {folder}. Skipping.')
+        raise FileNotFoundException
+
+
+def upload_from_folder(page, folder, time=0):
     # Check if video has been uploaded
     if os.path.exists(folder + '/uploaded') or os.path.exists(folder + '/noupload'): return
 
     # Get files
     video_file = folder + '/vid.mp4'
     thumbnail_file = folder + '/thumb.png'
-    title = read_file(folder + '/title.txt')
+    title_file = folder + '/title.txt'
+
+    # Check path validity
+    check_filepath(video_file)
+    check_filepath(thumbnail_file)
+    check_filepath(title_file)
+
+    title = read_file(title_file)
     description = read_file(folder + '/desc.txt')
     visibility = 'PUBLIC'
 
@@ -102,6 +148,12 @@ def upload_from_folder(page, folder):
     # Upload video
     file_chooser_fn(page, 'ytcp-button[id="select-files-button"]', video_file)
     page.wait_for_selector('h1[class="style-scope ytcp-uploads-dialog"]')
+    add_screenshot(page, 'upload_page')
+    #except_upload_limit_reached(page)
+
+    # Set upload
+    global did_upload
+    did_upload = True
 
     # Add title and description
     text_inputs = page.locator('#input')
@@ -111,32 +163,42 @@ def upload_from_folder(page, folder):
     text_inputs.last.locator('div[id="textbox"]').fill(description)
 
     # Add thumbnail
-    with page.expect_file_chooser() as file_chooser_promise:
-        page.locator('.remove-default-style.style-scope.ytcp-thumbnails-compact-editor-uploader-old').click()
-    file_chooser = file_chooser_promise.value
-    file_chooser.set_files(thumbnail_file)
+    if os.path.exists(thumbnail_file):
+        with page.expect_file_chooser() as file_chooser_promise:
+            page.locator('.remove-default-style.style-scope.ytcp-thumbnails-compact-editor-uploader-old').click()
+        file_chooser = file_chooser_promise.value
+        file_chooser.set_files(thumbnail_file)
+    else:
+        print(f'WARNING: Thumbnail for {title} could not be found.')
 
     # Mark as not for kids
     page.click('tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]')
-    page.click('button[test-id="REVIEW"]')
+    page.wait_for_selector('#step-badge-3')
+    page.click('#step-badge-3')
 
     # Set visibility
     page.wait_for_selector(f'tp-yt-paper-radio-button[name="{visibility}"]')
     page.click(f'tp-yt-paper-radio-button[name="{visibility}"]')
 
     # Close page
-    page.click('ytcp-button[id="done-button"]')
-    if page.locator('#dialog-title').count() > 0:
-        page.click('button[id="close-button"]')
+    page.click('#done-button.ytcp-uploads-dialog')
+    wait_for(4)
+    close_secondary_dialog(page)
     with open(folder + '/uploaded', 'w') as f: f.close()
 
 
-def get_folder_lists():
+def get_folders():
     # Get valid folders
     folder_path = get_output_dir()
     subfolders = [str(f.path) for f in os.scandir(folder_path) if f.is_dir()]
-    filtered = list(filter(lambda _dir: not (os.path.exists(_dir + '/uploaded') or os.path.exists(_dir + '/noupload')), subfolders))
+    filtered = list(
+        filter(lambda _dir: not (os.path.exists(_dir + '/uploaded') or os.path.exists(_dir + '/noupload')), subfolders)
+    )
+    return filtered
 
+
+def get_folder_lists():
+    filtered = get_folders()
     # Chunk lists
     chunked = []
     for i in range(0, len(filtered), 3):
@@ -144,10 +206,16 @@ def get_folder_lists():
     return chunked
 
 
+def wait_if_uploaded():
+    global did_upload
+    if did_upload:
+        input('Waiting...')
+
+
 def upload_to_channel(file='secrets.json'):
     (link, username, password) = parse_json(file)
     studio_page = get_page_link(link)
-    video_folder_chunks = get_folder_lists()
+    video_folders = get_folders()
     c = Channel(link)
     print(f'Posting to "{c.channel_name}"')
 
@@ -158,16 +226,14 @@ def upload_to_channel(file='secrets.json'):
             page = browser.new_page()
             youtube_login(page, studio_page, username, password)
 
-            for video_folders in video_folder_chunks:
-                for folder in video_folders:
-                    upload_from_folder(page, folder)
-                    page.reload()
-                print('DIALOG: Sleeping...\n')
-                time.sleep(10)
+            for folder in video_folders:
+                try: upload_from_folder(page, folder)
+                except FileNotFoundException: pass
 
+            print('Done.')
+            wait_if_uploaded()
             page.close(run_before_unload=True)
             browser.close()
-    except TERR as e:
+    except Exception as e:
         print(f'ERROR: {e}')
-    except:
-        print('Something went wrong. Exiting.')
+        wait_if_uploaded()
